@@ -13,7 +13,7 @@ logger = logging.getLogger(name=__name__)
 # 正则表达式匹配括号内容
 BRACKET_PATTERN = re.compile(r'[（(］\[【{［｛].*?[）)］】}］｝]')
 
-@register("ultimate_ai_plugin", "Your Name", "全能AI语音插件", "3.4.1")
+@register("ultimate_ai_plugin", "长安某", "AI语音", "1.0.0")
 class UltimateAIPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
