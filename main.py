@@ -1,5 +1,4 @@
 import re
-import logging
 import asyncio
 from typing import Dict, Optional
 from astrbot.api.all import *
@@ -7,14 +6,10 @@ from astrbot.api.star import Context, Star, register
 from astrbot.api.event import filter
 from astrbot.api.provider import ProviderRequest, LLMResponse
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(name=__name__)
-
 # 正则表达式匹配括号内容
 BRACKET_PATTERN = re.compile(r'[（(］\[【{［｛].*?[）)］】}］｝]')
 
-@register("ultimate_ai_plugin", "长安某", "AI语音", "1.0.0")
+@register("ultimate_ai_plugin", "长安某", "AI语音", "2.0.0")
 class UltimateAIPlugin(Star):
     def __init__(self, context: Context):
         super().__init__(context)
@@ -47,17 +42,16 @@ class UltimateAIPlugin(Star):
         if clean_text:
             try:
                 await self._send_ai_voice(event, clean_text)
-                logger.info(f"语音转换成功：{clean_text[:50]}...")
-            except Exception as e:
-                logger.error(f"语音发送失败: {e}")
+            except Exception:
+                pass
 
             if self.text_sending_mode.get(group_id, False):
                 # 文字同发状态，输出未处理的文本
                 text = "".join([segment.text for segment in chain if isinstance(segment, Plain)])
                 try:
                     await event.send(MessageChain([Plain(text)]))
-                except Exception as e:
-                    logger.error(f"文字同发消息发送失败: {e}")
+                except Exception:
+                    pass
             result.chain = []  # 清空消息链，避免额外发送文字消息
 
     @filter.after_message_sent()
@@ -79,8 +73,8 @@ class UltimateAIPlugin(Star):
         if not group_id:
             try:
                 await event.send(MessageChain([Plain("⚠️ 该功能仅支持QQ群聊")]))
-            except Exception as e:
-                logger.error(f"发送群聊限制消息时出错: {e}")
+            except Exception:
+                pass
             return
 
         try:
@@ -91,8 +85,8 @@ class UltimateAIPlugin(Star):
             if not categories:
                 try:
                     await event.send(MessageChain([Plain("⚠️ 当前没有可用的AI人物")]))
-                except Exception as e:
-                    logger.error(f"发送无可用AI人物消息时出错: {e}")
+                except Exception:
+                    pass
                 return
 
             message = ["🎤 当前可用AI语音人物："]
@@ -119,15 +113,14 @@ class UltimateAIPlugin(Star):
 
             try:
                 await event.send(MessageChain([Plain("\n".join(message))]))
-            except Exception as e:
-                logger.error(f"发送AI人物列表消息时出错: {e}")
+            except Exception:
+                pass
 
-        except Exception as e:
-            logger.error(f"获取列表失败: {str(e)}", exc_info=True)
+        except Exception:
             try:
-                await event.send(MessageChain([Plain(f"❌ 获取失败：{str(e)}")]))
-            except Exception as e:
-                logger.error(f"发送获取失败消息时出错: {e}")
+                await event.send(MessageChain([Plain("❌ 获取失败：发生未知错误")]))
+            except Exception:
+                pass
 
     @command("切换语音模式")
     async def toggle_speech_mode(self, event: AstrMessageEvent):
@@ -135,8 +128,8 @@ class UltimateAIPlugin(Star):
         if not group_id:
             try:
                 await event.send(MessageChain([Plain("⚠️ 该功能仅支持QQ群聊")]))
-            except Exception as e:
-                logger.error(f"发送群聊限制消息时出错: {e}")
+            except Exception:
+                pass
             return
 
         new_mode = not self.auto_speech_mode.get(group_id, False)
@@ -149,8 +142,8 @@ class UltimateAIPlugin(Star):
                 f"当前设置：\n"
                 f"- 默认模型：{self._get_character_name(group_id) or '未设置'}"
             )]))
-        except Exception as e:
-            logger.error(f"发送切换语音模式消息时出错: {e}")
+        except Exception:
+            pass
 
     @command("设置默认模型")
     async def set_default_character(self, event: AstrMessageEvent, identifier: str):
@@ -158,8 +151,8 @@ class UltimateAIPlugin(Star):
         if not group_id:
             try:
                 await event.send(MessageChain([Plain("⚠️ 该功能仅支持QQ群聊")]))
-            except Exception as e:
-                logger.error(f"发送群聊限制消息时出错: {e}")
+            except Exception:
+                pass
             return
 
         try:
@@ -178,8 +171,8 @@ class UltimateAIPlugin(Star):
             if not target:
                 try:
                     await event.send(MessageChain([Plain(f"❌ 未找到匹配人物：{identifier}")]))
-                except Exception as e:
-                    logger.error(f"发送未找到匹配人物消息时出错: {e}")
+                except Exception:
+                    pass
                 return
 
             self.default_characters[group_id] = str(target["character_id"])
@@ -189,15 +182,14 @@ class UltimateAIPlugin(Star):
                     f"名称：{target['character_name']}\n"
                     f"ID：{target['character_id']}"
                 )]))
-            except Exception as e:
-                logger.error(f"发送设置默认模型成功消息时出错: {e}")
+            except Exception:
+                pass
 
-        except Exception as e:
-            logger.error(f"设置失败: {str(e)}", exc_info=True)
+        except Exception:
             try:
-                await event.send(MessageChain([Plain(f"❌ 设置失败：{str(e)}")]))
-            except Exception as e:
-                logger.error(f"发送设置失败消息时出错: {e}")
+                await event.send(MessageChain([Plain("❌ 设置失败：发生未知错误")]))
+            except Exception:
+                pass
 
     @command("切换文字同发")
     async def toggle_text_sending_mode(self, event: AstrMessageEvent):
@@ -205,8 +197,8 @@ class UltimateAIPlugin(Star):
         if not group_id:
             try:
                 await event.send(MessageChain([Plain("⚠️ 该功能仅支持QQ群聊")]))
-            except Exception as e:
-                logger.error(f"发送群聊限制消息时出错: {e}")
+            except Exception:
+                pass
             return
 
         new_mode = not self.text_sending_mode.get(group_id, False)
@@ -215,8 +207,8 @@ class UltimateAIPlugin(Star):
         status = "✅ 已启用文字同发模式" if new_mode else "⛔ 已关闭文字同发模式"
         try:
             await event.send(MessageChain([Plain(status)]))
-        except Exception as e:
-            logger.error(f"发送切换文字同发模式消息时出错: {e}")
+        except Exception:
+            pass
 
     async def _refresh_character_cache(self, event, group_id):
         try:
@@ -234,13 +226,9 @@ class UltimateAIPlugin(Star):
             else:
                 raise Exception("无效的API响应格式")
 
-            logger.info(f"群组 {group_id} 缓存已更新，分类数：{len(self.character_cache[group_id])}")
-
         except asyncio.TimeoutError:
-            logger.warning(f"群组 {group_id} 请求超时")
             raise Exception("请求超时，请稍后重试")
-        except Exception as e:
-            logger.error(f"缓存刷新失败: {str(e)}")
+        except Exception:
             raise
 
     async def _send_ai_voice(self, event, text):
@@ -254,8 +242,8 @@ class UltimateAIPlugin(Star):
                 text=text[:500],  # 限制长度
                 timeout=10
             )
-        except Exception as e:
-            logger.error(f"语音发送失败: {str(e)}", exc_info=True)
+        except Exception:
+            pass
 
     async def _get_current_character(self, event, group_id):
         if default_id := self.default_characters.get(group_id):
