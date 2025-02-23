@@ -5,6 +5,7 @@ from typing import Dict, Optional
 from astrbot.api.all import *
 from astrbot.api.star import Context, Star, register
 from astrbot.api.event import filter
+from astrbot.api.provider import ProviderRequest, LLMResponse
 
 # 配置日志
 logging.basicConfig(level=logging.INFO)
@@ -20,8 +21,18 @@ class UltimateAIPlugin(Star):
         self.default_characters: Dict[str, str] = {}  # 群组ID: 人物ID
         self.auto_speech_mode: Dict[str, bool] = {}   # 群组ID: 自动语音状态
         self.character_cache: Dict[str, list] = {}    # 群组ID: 人物缓存
+        self.text_sending_mode: Dict[str, bool] = {}  # 群组ID: 文字同发状态
 
-    @filter.on_decorating_result(priority=1)
+    @filter.on_llm_request()
+    async def my_custom_hook_1(self, event: AstrMessageEvent, req: ProviderRequest):
+        print(req)  # 打印请求的文本
+        req.system_prompt += "自定义 system_prompt"
+
+    @filter.on_llm_response()
+    async def on_llm_resp(self, event: AstrMessageEvent, resp: LLMResponse):
+        print(resp)
+
+    @filter.on_decorating_result()
     async def on_decorating_result(self, event: AstrMessageEvent):
         result = event.get_result()
         if not result or not result.is_llm_result():
@@ -31,13 +42,27 @@ class UltimateAIPlugin(Star):
         if not group_id or not self.auto_speech_mode.get(group_id, False):
             return
 
-        clean_text = self._clean_llm_text(result.chain)
+        chain = result.chain
+        clean_text = self._clean_llm_text(chain)
         if clean_text:
-            await self._send_ai_voice(event, clean_text)
-            result.chain = []
-            logger.info(f"语音转换成功：{clean_text[:50]}...")
-        else:
-            result.chain = [Plain("（内容已过滤）")]
+            try:
+                await self._send_ai_voice(event, clean_text)
+                logger.info(f"语音转换成功：{clean_text[:50]}...")
+            except Exception as e:
+                logger.error(f"语音发送失败: {e}")
+
+            if self.text_sending_mode.get(group_id, False):
+                # 文字同发状态，输出未处理的文本
+                text = "".join([segment.text for segment in chain if isinstance(segment, Plain)])
+                try:
+                    await event.send(MessageChain([Plain(text)]))
+                except Exception as e:
+                    logger.error(f"文字同发消息发送失败: {e}")
+            result.chain = []  # 清空消息链，避免额外发送文字消息
+
+    @filter.after_message_sent()
+    async def after_message_sent(self, event: AstrMessageEvent):
+        pass
 
     def _clean_llm_text(self, chain) -> str:
         clean_text = ""
@@ -52,7 +77,10 @@ class UltimateAIPlugin(Star):
     async def get_ai_characters(self, event: AstrMessageEvent):
         group_id = self._get_group_id(event)
         if not group_id:
-            yield event.plain_result("⚠️ 该功能仅支持QQ群聊")
+            try:
+                await event.send(MessageChain([Plain("⚠️ 该功能仅支持QQ群聊")]))
+            except Exception as e:
+                logger.error(f"发送群聊限制消息时出错: {e}")
             return
 
         try:
@@ -61,19 +89,22 @@ class UltimateAIPlugin(Star):
 
             categories = self.character_cache.get(group_id, [])
             if not categories:
-                yield event.plain_result("⚠️ 当前没有可用的AI人物")
+                try:
+                    await event.send(MessageChain([Plain("⚠️ 当前没有可用的AI人物")]))
+                except Exception as e:
+                    logger.error(f"发送无可用AI人物消息时出错: {e}")
                 return
 
             message = ["🎤 当前可用AI语音人物："]
             for cat in categories:
                 if not isinstance(cat, dict):
                     continue
-                
+
                 category_msg = [
                     f"\n▍{cat.get('type', '未分类')}：",
                     f"共 {len(cat.get('characters', []))} 个人物"
                 ]
-                
+
                 characters = []
                 for idx, char in enumerate(cat.get("characters", []), 1):
                     char_info = [
@@ -81,44 +112,59 @@ class UltimateAIPlugin(Star):
                         f"   ID: {char.get('character_id', 'N/A')}"
                     ]
                     characters.append("\n".join(char_info))
-                
+
                 if characters:
                     category_msg.extend(characters)
                     message.extend(category_msg)
 
-            yield event.plain_result("\n".join(message))
+            try:
+                await event.send(MessageChain([Plain("\n".join(message))]))
+            except Exception as e:
+                logger.error(f"发送AI人物列表消息时出错: {e}")
 
         except Exception as e:
             logger.error(f"获取列表失败: {str(e)}", exc_info=True)
-            yield event.plain_result(f"❌ 获取失败：{str(e)}")
+            try:
+                await event.send(MessageChain([Plain(f"❌ 获取失败：{str(e)}")]))
+            except Exception as e:
+                logger.error(f"发送获取失败消息时出错: {e}")
 
     @command("切换语音模式")
     async def toggle_speech_mode(self, event: AstrMessageEvent):
         group_id = self._get_group_id(event)
         if not group_id:
-            yield event.plain_result("⚠️ 该功能仅支持QQ群聊")
+            try:
+                await event.send(MessageChain([Plain("⚠️ 该功能仅支持QQ群聊")]))
+            except Exception as e:
+                logger.error(f"发送群聊限制消息时出错: {e}")
             return
 
         new_mode = not self.auto_speech_mode.get(group_id, False)
         self.auto_speech_mode[group_id] = new_mode
-        
+
         status = "✅ 已启用自动语音模式" if new_mode else "⛔ 已关闭自动语音模式"
-        yield event.plain_result(
-            f"{status}\n"
-            f"当前设置：\n"
-            f"- 默认模型：{self._get_character_name(group_id) or '未设置'}"
-        )
+        try:
+            await event.send(MessageChain([Plain(
+                f"{status}\n"
+                f"当前设置：\n"
+                f"- 默认模型：{self._get_character_name(group_id) or '未设置'}"
+            )]))
+        except Exception as e:
+            logger.error(f"发送切换语音模式消息时出错: {e}")
 
     @command("设置默认模型")
     async def set_default_character(self, event: AstrMessageEvent, identifier: str):
         group_id = self._get_group_id(event)
         if not group_id:
-            yield event.plain_result("⚠️ 该功能仅支持QQ群聊")
+            try:
+                await event.send(MessageChain([Plain("⚠️ 该功能仅支持QQ群聊")]))
+            except Exception as e:
+                logger.error(f"发送群聊限制消息时出错: {e}")
             return
 
         try:
             await self._refresh_character_cache(event, group_id)
-            
+
             target = None
             for cat in self.character_cache.get(group_id, []):
                 for char in cat.get("characters", []):
@@ -130,19 +176,47 @@ class UltimateAIPlugin(Star):
                     break
 
             if not target:
-                yield event.plain_result(f"❌ 未找到匹配人物：{identifier}")
+                try:
+                    await event.send(MessageChain([Plain(f"❌ 未找到匹配人物：{identifier}")]))
+                except Exception as e:
+                    logger.error(f"发送未找到匹配人物消息时出错: {e}")
                 return
 
             self.default_characters[group_id] = str(target["character_id"])
-            yield event.plain_result(
-                f"✅ 已设置默认模型：\n"
-                f"名称：{target['character_name']}\n"
-                f"ID：{target['character_id']}"
-            )
+            try:
+                await event.send(MessageChain([Plain(
+                    f"✅ 已设置默认模型：\n"
+                    f"名称：{target['character_name']}\n"
+                    f"ID：{target['character_id']}"
+                )]))
+            except Exception as e:
+                logger.error(f"发送设置默认模型成功消息时出错: {e}")
 
         except Exception as e:
             logger.error(f"设置失败: {str(e)}", exc_info=True)
-            yield event.plain_result(f"❌ 设置失败：{str(e)}")
+            try:
+                await event.send(MessageChain([Plain(f"❌ 设置失败：{str(e)}")]))
+            except Exception as e:
+                logger.error(f"发送设置失败消息时出错: {e}")
+
+    @command("切换文字同发")
+    async def toggle_text_sending_mode(self, event: AstrMessageEvent):
+        group_id = self._get_group_id(event)
+        if not group_id:
+            try:
+                await event.send(MessageChain([Plain("⚠️ 该功能仅支持QQ群聊")]))
+            except Exception as e:
+                logger.error(f"发送群聊限制消息时出错: {e}")
+            return
+
+        new_mode = not self.text_sending_mode.get(group_id, False)
+        self.text_sending_mode[group_id] = new_mode
+
+        status = "✅ 已启用文字同发模式" if new_mode else "⛔ 已关闭文字同发模式"
+        try:
+            await event.send(MessageChain([Plain(status)]))
+        except Exception as e:
+            logger.error(f"发送切换文字同发模式消息时出错: {e}")
 
     async def _refresh_character_cache(self, event, group_id):
         try:
@@ -189,7 +263,7 @@ class UltimateAIPlugin(Star):
                 for char in cat.get("characters", []):
                     if str(char.get("character_id")) == default_id:
                         return char
-        
+
         first_char = next(
             (char for cat in self.character_cache.get(group_id, [])
              for char in cat.get("characters", [])),
