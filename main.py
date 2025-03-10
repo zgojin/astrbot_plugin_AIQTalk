@@ -1,5 +1,7 @@
 import re
 import asyncio
+import yaml
+import os
 from typing import Dict, Optional
 from astrbot.api.all import *
 from astrbot.api.star import Context, Star, register
@@ -9,6 +11,9 @@ from astrbot.api.provider import ProviderRequest, LLMResponse
 # 正则表达式匹配括号内容
 BRACKET_PATTERN = re.compile(r'[（(］\[【{［｛].*?[）)］】}］｝]')
 
+# 配置文件路径
+CONFIG_FILE_PATH = os.path.join("data", "plugins", "astrbot_plugin_AIQTalk", "ultimate_ai_plugin_config.yml")
+
 @register("ultimate_ai_plugin", "长安某", "AI语音", "2.0.0")
 class UltimateAIPlugin(Star):
     def __init__(self, context: Context):
@@ -17,6 +22,45 @@ class UltimateAIPlugin(Star):
         self.auto_speech_mode: Dict[str, bool] = {}   # 群组ID: 自动语音状态
         self.character_cache: Dict[str, list] = {}    # 群组ID: 人物缓存
         self.text_sending_mode: Dict[str, bool] = {}  # 群组ID: 文字同发状态
+        self.load_config()
+
+    def load_config(self):
+        # 确保配置文件所在的目录存在
+        config_dir = os.path.dirname(CONFIG_FILE_PATH)
+        os.makedirs(config_dir, exist_ok=True)
+
+        # 如果配置文件不存在，创建一个空的配置文件
+        if not os.path.exists(CONFIG_FILE_PATH):
+            self.save_config()
+
+        # 加载配置
+        try:
+            with open(CONFIG_FILE_PATH, "r", encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+                if config:
+                    self.default_characters = config.get("default_characters", {})
+                    self.auto_speech_mode = config.get("auto_speech_mode", {})
+                    self.character_cache = config.get("character_cache", {})
+                    self.text_sending_mode = config.get("text_sending_mode", {})
+        except Exception as e:
+            print(f"加载配置文件时出错: {e}")
+
+    def save_config(self):
+        config = {
+            "default_characters": self.default_characters,
+            "auto_speech_mode": self.auto_speech_mode,
+            "character_cache": self.character_cache,
+            "text_sending_mode": self.text_sending_mode
+        }
+        try:
+            # 确保配置文件所在的目录存在
+            config_dir = os.path.dirname(CONFIG_FILE_PATH)
+            os.makedirs(config_dir, exist_ok=True)
+
+            with open(CONFIG_FILE_PATH, "w", encoding="utf-8") as f:
+                yaml.dump(config, f, default_flow_style=False, allow_unicode=True)
+        except Exception as e:
+            print(f"保存配置文件时出错: {e}")
 
     @filter.on_llm_request()
     async def my_custom_hook_1(self, event: AstrMessageEvent, req: ProviderRequest):
@@ -134,6 +178,7 @@ class UltimateAIPlugin(Star):
 
         new_mode = not self.auto_speech_mode.get(group_id, False)
         self.auto_speech_mode[group_id] = new_mode
+        self.save_config()
 
         status = "✅ 已启用自动语音模式" if new_mode else "⛔ 已关闭自动语音模式"
         try:
@@ -176,6 +221,7 @@ class UltimateAIPlugin(Star):
                 return
 
             self.default_characters[group_id] = str(target["character_id"])
+            self.save_config()
             try:
                 await event.send(MessageChain([Plain(
                     f"✅ 已设置默认模型：\n"
@@ -203,6 +249,7 @@ class UltimateAIPlugin(Star):
 
         new_mode = not self.text_sending_mode.get(group_id, False)
         self.text_sending_mode[group_id] = new_mode
+        self.save_config()
 
         status = "✅ 已启用文字同发模式" if new_mode else "⛔ 已关闭文字同发模式"
         try:
