@@ -89,14 +89,12 @@ class UltimateAIPlugin(Star):
             except Exception:
                 pass
 
-            if self.text_sending_mode.get(group_id, False):
-                # 文字同发状态，输出未处理的文本
-                text = "".join([segment.text for segment in chain if isinstance(segment, Plain)])
-                try:
-                    await event.send(MessageChain([Plain(text)]))
-                except Exception:
-                    pass
-            result.chain = []  # 清空消息链，避免额外发送文字消息
+        # 根据文字同发模式决定是否清空消息链
+        if self.text_sending_mode.get(group_id, False):
+            # 文字同发模式，不清空消息链，不发送文本，框架会自动发送文本
+            pass
+        else:
+            result.chain = []
 
     @filter.after_message_sent()
     async def after_message_sent(self, event: AstrMessageEvent):
